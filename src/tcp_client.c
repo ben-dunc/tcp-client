@@ -1,3 +1,10 @@
+/*
+    tcp_client.c
+    Created by Benjamin Duncan
+    Sep 22, 2023
+    For Computer Networks @ BYU
+*/
+
 #include "log.h"
 
 #include "tcp_client.h"

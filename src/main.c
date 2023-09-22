@@ -1,3 +1,10 @@
+/*
+    main.c
+    Created by Benjamin Duncan
+    Sep 22, 2023
+    For Computer Networks @ BYU
+*/
+
 #include <stdio.h>
 #include <string.h>
 
