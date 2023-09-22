@@ -19,7 +19,10 @@
 #define ACTION_RANDOM "random"
 
 void print_usage() {
-    char* helpInfo = "\nUsage: tcp_client [--help] [-v] [-h HOST] [-p PORT] ACTION MESSAGE\n\nArguments:\n\tACTION   Must be uppercase, lowercase, reverse, shuffle, or random.\n\tMESSAGE  Message to send to the server\n\nOptions:\n\t--help\n\t-v, --verbose\n\t--host HOSTNAME, -h HOSTNAME\n\t--port PORT, -p PORT\n\n";
+    char* helpInfo = "\nUsage: tcp_client [--help] [-v] [-h HOST] [-p PORT] ACTION MESSAGE\n\n"
+    "Arguments:\n\tACTION   Must be uppercase, lowercase, reverse, shuffle, or random.\n\tMESSAGE"
+    "  Message to send to the server\n\nOptions:\n\t--help\n\t-v, --verbose\n\t--host HOSTNAME, "
+    "  -h HOSTNAME\n\t--port PORT, -p PORT\n\n";
     fprintf(stderr, "%s", helpInfo);
 }
 
@@ -60,7 +63,9 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
             { 0,          0,                 0,   0  }
         };
 
-        c = getopt_long(argc, argv, "vp:h:", long_options, &option_index);
+        log_trace("calling getopt_long");
+        c = getopt_long(argc, argv, "vp:h:",
+            long_options, &option_index);
 
         if (c == -1)
             break;
@@ -68,34 +73,41 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
         switch (c) {
             case '-': // help
                 print_usage();
-                log_debug("--help argument: %s", long_options[option_index].name);
+                log_debug("--help argument: \t%s",
+                    long_options[option_index].name);
+                exit(EXIT_SUCCESS);
                 break;
             case 'v': // verbose
                 log_set_quiet(false);
-                log_debug("-v, --verbose argument: %s", long_options[option_index].name);
+                log_debug("-v, --verbose argument: \t%s",
+                    long_options[option_index].name);
                 break;
             case 'p': // port
-                log_debug("-p, --port argument: %s, %s", long_options[option_index].name, optarg);
+                log_debug("-p, --port argument: \t%s, %s", 
+                    long_options[option_index].name, optarg);
 
-                if (!isdigit(optarg)) {
-                    log_error("The port argument must be a number. Received argument: %s", optarg);
+                if (atoi(optarg) == 0) {
+                    log_error("The port argument must be a number. Received argument: \t%s", 
+                        optarg);
                     return EXIT_FAILURE;
                 }
 
                 config->port = optarg;
                 break;
             case 'h': // host
-                log_debug("-h, --host argument: %s, %s", long_options[option_index].name, optarg);
+                log_debug("-h, --host argument: \t%s, %s",
+                    long_options[option_index].name, optarg);
                 config->host = optarg;
                 break;
             case '?':
-                // fprintf(stderr, "\nunkown argument: %s", argv[optind - 1]);
                 print_usage();
                 break;
             default:
                 break;
         }
     }
+
+    log_trace("getting action and message");
 
     if (optind < argc) {
         while (optind < argc) {
@@ -117,7 +129,7 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
         }
     }
 
-    log_debug("[CONFIG] port: %s, host: %s, action: %s, message: %s", config->port, config->host, config->action, config->message);
+    log_trace("setting default values if needed");
 
     if (config->host == NULL) {
         config->host = TCP_CLIENT_DEFAULT_HOST;
@@ -134,6 +146,8 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
         return EXIT_FAILURE;
     }
 
+    log_trace("finished parsing arguments");
+
     return EXIT_SUCCESS;
 }
 
@@ -148,18 +162,44 @@ Arguments:
     Config config: A config struct with the necessary information.
 Return value:
     Returns the socket file descriptor or -1 if an error occurs.
+
+
+
+
+
+    struct addrinfo {
+               int              ai_flags;
+               int              ai_family;
+               int              ai_socktype;
+               int              ai_protocol;
+               socklen_t        ai_addrlen;
+               struct sockaddr *ai_addr;
+               char            *ai_canonname;
+               struct addrinfo *ai_next;
+           };
 */
 int tcp_client_connect(Config config) {
-    log_debug("connecting");
+    log_trace("connecting");
     
     struct addrinfo hints, *res;
     int sockfd;
+    int errorStatus = 0;
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    if (getaddrinfo(config.host, config.port, &hints, &res) != 0) {
+    log_trace("[struct Config config] host: '%s', port: '%s', ", config.host, config.port);
+    if (hints.ai_addr != NULL) {
+        log_trace("[struct sockaddr hints.ai_addr] sa_family: %i, sa_data: %s", 
+            (int) hints.ai_addr->sa_family, hints.ai_addr->sa_data);
+    } else {
+        log_trace("[struct sockaddr hints.ai_addr] NULL");
+    }
+
+    if ((errorStatus = getaddrinfo(config.host, config.port, &hints, &res)) != 0) {
+        log_error("getaddrinfo returned error code '%i' which means: %s", 
+            errorStatus, gai_strerror(errorStatus));
         return -1;
     }
 
@@ -168,7 +208,7 @@ int tcp_client_connect(Config config) {
     connect(sockfd, res->ai_addr, res->ai_addrlen);
     freeaddrinfo(res); // free the linked list
 
-    log_debug("connected");
+    log_trace("connected");
 
     return sockfd;
 }
@@ -183,14 +223,19 @@ Return value:
     Returns a 1 on failure, 0 on success
 */
 int tcp_client_send_request(int sockfd, Config config) {
-    log_debug("sending");
+    log_trace("sending");
     
-    int len = strlen(config.message);
+    char messageToSend[1024];
+    sprintf(messageToSend, "%s %d %s", config.action,
+        (int) strlen(config.message), config.message);
     int bytes_sent = 0;
+    int len = strlen(messageToSend);
 
     while (len - bytes_sent > 0) {
-        int status = send(sockfd, config.message + bytes_sent, len - bytes_sent, 0);
-        log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', length of message sent: %i", status, bytes_sent, config.message + bytes_sent, len - bytes_sent);
+        int status = send(sockfd, messageToSend + bytes_sent, len - bytes_sent, 0);
+        log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', \
+            length of message sent: %i", 
+            status, bytes_sent, messageToSend + bytes_sent, len - bytes_sent);
 
         // did it error
         if (status == -1) {
@@ -201,7 +246,7 @@ int tcp_client_send_request(int sockfd, Config config) {
         bytes_sent += status;
     }
 
-    log_debug("sent");
+    log_trace("sent");
     
     return EXIT_SUCCESS;
 }
@@ -217,7 +262,7 @@ Return value:
     Returns a 1 on failure, 0 on success
 */
 int tcp_client_receive_response(int sockfd, char *buf, int buf_size) {
-    log_debug("receiving");
+    log_trace("receiving");
 
     int bytes_recv = 0, status = 0;
 
@@ -232,8 +277,8 @@ int tcp_client_receive_response(int sockfd, char *buf, int buf_size) {
         bytes_recv += status;
     }
 
-    buf[bytes_recv + 1] = 0;
-    log_debug("received");
+    buf[bytes_recv] = 0;
+    log_trace("received");
     return EXIT_SUCCESS;
 }
 
@@ -246,6 +291,6 @@ Return value:
     Returns a 1 on failure, 0 on success
 */
 int tcp_client_close(int sockfd) {
-    log_debug("close");
+    log_trace("close");
     return close(sockfd) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 } 
