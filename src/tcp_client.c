@@ -18,6 +18,14 @@
 #define ACTION_SHUFFLE "shuffle"
 #define ACTION_RANDOM "random"
 
+/*
+Description:
+    Prints the usage of this program
+Arguments:
+    none
+Return value:
+    void
+*/
 void print_usage() {
     char* helpInfo = "\nUsage: tcp_client [--help] [-v] [-h HOST] [-p PORT] ACTION MESSAGE\n\n"
     "Arguments:\n\tACTION   Must be uppercase, lowercase, reverse, shuffle, or random.\n\tMESSAGE"
@@ -26,6 +34,15 @@ void print_usage() {
     fprintf(stderr, "%s", helpInfo);
 }
 
+/*
+Description:
+    Parses the commandline arguments and options given to the program.
+Arguments:
+    char * action: the character string representing the action to be considered. It must be
+        either "uppercase", "lowercase", "reverse", "shuffle" or "random".
+Return value:
+    Returns true on success, false on failure.
+*/
 bool is_valid_action(char * action) {
     return  strcmp(action, ACTION_UPPERCASE) == 0 || 
             strcmp(action, ACTION_LOWERCASE) == 0 || 
