@@ -34,10 +34,12 @@ Return value:
     void
 */
 void print_usage() {
-    char* helpInfo = "\nUsage: tcp_client [--help] [-v] [-h HOST] [-p PORT] ACTION MESSAGE\n\n"
-    "Arguments:\n\tACTION   Must be uppercase, lowercase, reverse, shuffle, or random.\n\tMESSAGE"
-    "  Message to send to the server\n\nOptions:\n\t--help\n\t-v, --verbose\n\t--host HOSTNAME, "
-    "  -h HOSTNAME\n\t--port PORT, -p PORT\n\n";
+    char *helpInfo = "\nUsage: tcp_client [--help] [-v] [-h HOST] [-p PORT] ACTION MESSAGE\n\n"
+                     "Arguments:\n\tACTION   Must be uppercase, lowercase, reverse, shuffle, or "
+                     "random.\n\tMESSAGE"
+                     "  Message to send to the server\n\nOptions:\n\t--help\n\t-v, "
+                     "--verbose\n\t--host HOSTNAME, "
+                     "  -h HOSTNAME\n\t--port PORT, -p PORT\n\n";
     fprintf(stderr, "%s", helpInfo);
 }
 
@@ -50,12 +52,10 @@ Arguments:
 Return value:
     Returns true on success, false on failure.
 */
-bool is_valid_action(char * action) {
-    return  strcmp(action, ACTION_UPPERCASE) == 0 || 
-            strcmp(action, ACTION_LOWERCASE) == 0 || 
-            strcmp(action, ACTION_REVERSE) == 0 || 
-            strcmp(action, ACTION_SHUFFLE) == 0 || 
-            strcmp(action, ACTION_RANDOM) == 0;
+bool is_valid_action(char *action) {
+    return strcmp(action, ACTION_UPPERCASE) == 0 || strcmp(action, ACTION_LOWERCASE) == 0 ||
+           strcmp(action, ACTION_REVERSE) == 0 || strcmp(action, ACTION_SHUFFLE) == 0 ||
+           strcmp(action, ACTION_RANDOM) == 0;
 }
 
 /*
@@ -78,56 +78,50 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
 
     while (1) {
         int option_index = 0;
-        
-        static struct option long_options[] = {
-            { "help",     no_argument,       0,  '-' },
-            { "verbose",  no_argument,       0,  'v' },
-            { "port",     required_argument, 0,  'p' },
-            { "host",     required_argument, 0,  'h' },
-            { 0,          0,                 0,   0  }
-        };
+
+        static struct option long_options[] = {{"help", no_argument, 0, '-'},
+                                               {"verbose", no_argument, 0, 'v'},
+                                               {"port", required_argument, 0, 'p'},
+                                               {"host", required_argument, 0, 'h'},
+                                               {0, 0, 0, 0}};
 
         log_trace("calling getopt_long");
-        c = getopt_long(argc, argv, "vp:h:",
-            long_options, &option_index);
+        c = getopt_long(argc, argv, "vp:h:", long_options, &option_index);
 
         if (c == -1)
             break;
 
         switch (c) {
-            case '-': // help
-                print_usage();
-                log_debug("--help argument: \t%s",
-                    long_options[option_index].name);
-                exit(EXIT_SUCCESS);
-                break;
-            case 'v': // verbose
-                log_set_quiet(false);
-                log_debug("-v, --verbose argument: \t%s",
-                    long_options[option_index].name);
-                break;
-            case 'p': // port
-                log_debug("-p, --port argument: \t%s, %s", 
-                    long_options[option_index].name, optarg);
+        case '-': // help
+            print_usage();
+            log_debug("--help argument: \t%s", long_options[option_index].name);
+            exit(EXIT_SUCCESS);
+            break;
+        case 'v': // verbose
+            log_set_quiet(false);
+            log_debug("-v, --verbose argument: \t%s", long_options[option_index].name);
+            break;
+        case 'p': // port
+            log_debug("-p, --port argument: \t%s, %s", long_options[option_index].name, optarg);
 
-                if (atoi(optarg) == 0) {
-                    log_error("The port argument must be a number. Received argument: \t%s", 
+            if (atoi(optarg) == 0) {
+                fprintf(stderr, "\nThe port argument must be a number. Received argument: \t%s",
                         optarg);
-                    return EXIT_FAILURE;
-                }
-
-                config->port = optarg;
-                break;
-            case 'h': // host
-                log_debug("-h, --host argument: \t%s, %s",
-                    long_options[option_index].name, optarg);
-                config->host = optarg;
-                break;
-            case '?':
                 print_usage();
-                break;
-            default:
-                break;
+                return EXIT_FAILURE;
+            }
+
+            config->port = optarg;
+            break;
+        case 'h': // host
+            log_debug("-h, --host argument: \t%s, %s", long_options[option_index].name, optarg);
+            config->host = optarg;
+            break;
+        case '?':
+            print_usage();
+            break;
+        default:
+            break;
         }
     }
 
@@ -135,20 +129,22 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
 
     if (optind < argc) {
         while (optind < argc) {
-            char * arg = argv[optind++];
+            char *arg = argv[optind++];
             if (config->action == NULL) {
                 if (is_valid_action(arg)) {
                     log_debug("Found valid action: %s", arg);
                     config->action = arg;
                 } else {
-                    log_warn("Invalid action: %s", arg);
+                    fprintf(stderr, "\nInvalid action: %s\n", arg);
+                    print_usage();
                     return EXIT_FAILURE;
                 }
+            } else if (config->message == NULL) {
+                log_debug("Found message: %s", arg);
+                config->message = arg;
             } else {
-                if (config->message == NULL) {
-                    log_debug("Found message: %s", arg);
-                    config->message = arg;
-                }
+                fprintf(stderr, "\nToo many arguments: %s\n", arg);
+                print_usage();
             }
         }
     }
@@ -166,7 +162,8 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
     }
 
     if (config->action == NULL || config->message == NULL) {
-        log_error("An action and a message must be provided.");
+        fprintf(stderr, "\nAn action and a message must be provided.\n");
+        print_usage();
         return EXIT_FAILURE;
     }
 
@@ -186,25 +183,10 @@ Arguments:
     Config config: A config struct with the necessary information.
 Return value:
     Returns the socket file descriptor or -1 if an error occurs.
-
-
-
-
-
-    struct addrinfo {
-               int              ai_flags;
-               int              ai_family;
-               int              ai_socktype;
-               int              ai_protocol;
-               socklen_t        ai_addrlen;
-               struct sockaddr *ai_addr;
-               char            *ai_canonname;
-               struct addrinfo *ai_next;
-           };
 */
 int tcp_client_connect(Config config) {
     log_trace("connecting");
-    
+
     struct addrinfo hints, *res;
     int sockfd;
     int errorStatus = 0;
@@ -215,21 +197,31 @@ int tcp_client_connect(Config config) {
 
     log_trace("[struct Config config] host: '%s', port: '%s', ", config.host, config.port);
     if (hints.ai_addr != NULL) {
-        log_trace("[struct sockaddr hints.ai_addr] sa_family: %i, sa_data: %s", 
-            (int) hints.ai_addr->sa_family, hints.ai_addr->sa_data);
+        log_trace("[struct sockaddr hints.ai_addr] sa_family: %i, sa_data: %s",
+                  (int)hints.ai_addr->sa_family, hints.ai_addr->sa_data);
     } else {
         log_trace("[struct sockaddr hints.ai_addr] NULL");
     }
 
     if ((errorStatus = getaddrinfo(config.host, config.port, &hints, &res)) != 0) {
-        log_error("getaddrinfo returned error code '%i' which means: %s", 
-            errorStatus, gai_strerror(errorStatus));
+        log_error("getaddrinfo returned error code '%i' which means: %s", errorStatus,
+                  gai_strerror(errorStatus));
         return -1;
     }
 
     sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    log_trace("sockfd: %i", sockfd);
 
-    connect(sockfd, res->ai_addr, res->ai_addrlen);
+    if (sockfd == -1)
+        return sockfd;
+
+    if (connect(sockfd, res->ai_addr, res->ai_addrlen) == -1) {
+        log_info("connect() returned -1");
+        return -1;
+    }
+
+    log_trace("calling freeaddrinfo");
+
     freeaddrinfo(res); // free the linked list
 
     log_trace("connected");
@@ -248,18 +240,17 @@ Return value:
 */
 int tcp_client_send_request(int sockfd, Config config) {
     log_trace("sending");
-    
+
     char messageToSend[1024];
-    sprintf(messageToSend, "%s %d %s", config.action,
-        (int) strlen(config.message), config.message);
+    sprintf(messageToSend, "%s %d %s", config.action, (int)strlen(config.message), config.message);
     int bytes_sent = 0;
     int len = strlen(messageToSend);
 
     while (len - bytes_sent > 0) {
         int status = send(sockfd, messageToSend + bytes_sent, len - bytes_sent, 0);
         log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', \
-            length of message sent: %i", 
-            status, bytes_sent, messageToSend + bytes_sent, len - bytes_sent);
+            length of message sent: %i",
+                  status, bytes_sent, messageToSend + bytes_sent, len - bytes_sent);
 
         // did it error
         if (status == -1) {
@@ -271,7 +262,7 @@ int tcp_client_send_request(int sockfd, Config config) {
     }
 
     log_trace("sent");
-    
+
     return EXIT_SUCCESS;
 }
 
@@ -292,7 +283,7 @@ int tcp_client_receive_response(int sockfd, char *buf, int buf_size) {
 
     while ((status = recv(sockfd, buf + bytes_recv, buf_size, 0)) != 0) {
         log_trace("[receiving] status: %i, bytes_recv: %i", status, bytes_recv);
-        
+
         if (status == -1) {
             log_error("An error occured and send returned -1. Exiting program.");
             return EXIT_FAILURE;
@@ -317,4 +308,4 @@ Return value:
 int tcp_client_close(int sockfd) {
     log_trace("close");
     return close(sockfd) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-} 
+}
