@@ -74,14 +74,13 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
     config->file = NULL;
     config->port = NULL;
     config->host = NULL;
-
-    while (1) {
+    M while (1) {
         int option_index = 0;
 
-        static struct option long_options[] = {{"help", no_argument, 0, '-'},
-                                               {"verbose", no_argument, 0, 'v'},
-                                               {"port", required_argument, 0, 'p'},
-                                               {"host", required_argument, 0, 'h'},
+        static struct option long_options[] = {{HELP_FLAG, no_argument, 0, '-'},
+                                               {VERBOSE_FLAG, no_argument, 0, 'v'},
+                                               {PORT_FLAG, required_argument, 0, 'p'},
+                                               {HOST_FLAG, required_argument, 0, 'h'},
                                                {0, 0, 0, 0}};
 
         c = getopt_long(argc, argv, "vp:h:", long_options, &option_index);
