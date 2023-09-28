@@ -7,6 +7,7 @@
 
 #include "tcp_client.h"
 #include "log.h"
+#include <string.h>
 
 #define HELP_FLAG "help"
 #define VERBOSE_FLAG "verbose"
@@ -154,7 +155,7 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
 
     log_debug("[config] port: %s, host: %s, file: %s", config->port, config->host, config->file);
 
-    log_trace("finished parsing arguments");
+    log_trace("EXITING parsing");
 
     return EXIT_SUCCESS;
 }
@@ -172,7 +173,7 @@ Return value:
     Returns the socket file descriptor or -1 if an error occurs.
 */
 int tcp_client_connect(Config config) {
-    log_trace("connecting");
+    log_trace("\tENTERING connect");
 
     struct addrinfo hints, *res;
     int sockfd;
@@ -211,7 +212,7 @@ int tcp_client_connect(Config config) {
 
     freeaddrinfo(res); // free the linked list
 
-    log_trace("connected");
+    log_trace("\tEXITING connect");
 
     return sockfd;
 }
@@ -227,13 +228,17 @@ Return value:
     Returns a 1 on failure, 0 on success
 */
 int tcp_client_send_request(int sockfd, char *action, char *message) {
-    log_trace("entering send_request");
+    log_trace("\tENTERING send_request");
 
-    char messageToSend[1024];
+    log_trace("init messageToSend");
+    char messageToSend[strlen(message) + 20];
+    log_trace("assigning messageToSend");
     sprintf(messageToSend, "%s %d %s", action, (int)strlen(message), message);
     int bytes_sent = 0;
+    log_trace("getting message length");
     int len = strlen(messageToSend);
 
+    log_trace("entering while loop");
     while (len - bytes_sent > 0) {
         int status = send(sockfd, messageToSend + bytes_sent, len - bytes_sent, 0);
         log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', \
@@ -249,7 +254,7 @@ int tcp_client_send_request(int sockfd, char *action, char *message) {
         bytes_sent += status;
     }
 
-    log_trace("exiting send_request");
+    log_trace("\tEXITING send_request");
 
     return EXIT_SUCCESS;
 }
@@ -266,7 +271,49 @@ Arguments:
 Return value:
     Returns a 1 on failure, 0 on success
 */
-int tcp_client_receive_response(int sockfd, int (*handle_response)(char *));
+int tcp_client_receive_response(int sockfd, int (*handle_response)(char *)) {
+    log_trace("\tENTERING receive_reponse");
+
+    int bytes_recv = 0, status = 0, buf_len = 1024, parse_index = 0;
+    bool search_num = true;
+    bool callback_result = false;
+    char *buf = malloc(sizeof(char) * buf_len);
+
+    while (!callback_result) {
+        status = recv(sockfd, buf + bytes_recv, strlen(buf), 0);
+        if (status == 0) {
+            fprintf(stderr, "\nThe server closed the connection before\n");
+            return EXIT_FAILURE;
+        } else if (status == -1) {
+            fprintf(stderr, "\nAn error occured and send() returned -1\n");
+            return EXIT_FAILURE;
+        }
+
+        bytes_recv += status;
+
+        // need to update?
+        if (bytes_recv >= buf_len - 100) {
+            buf_len *= 2;
+            buf = realloc(buf, buf_len);
+        }
+
+        buf[bytes_recv] = 0;
+
+        log_trace("buffer: %s", buf);
+
+        // check for numbers, parse, and callback
+        // if (search_num && bytes_recv - parse_index > 0) {
+        //     // check for numbers
+        //     char *num;
+        //     while ((num = str))
+        // } else {
+        //     //
+        // }
+    }
+
+    log_trace("\tEXITING receive_reponse");
+    return EXIT_SUCCESS;
+}
 
 /*
 Description:
@@ -277,7 +324,7 @@ Return value:
     Returns a 1 on failure, 0 on success
 */
 int tcp_client_close(int sockfd) {
-    log_trace("executing close (tcp)");
+    log_trace("\tEXECUTING close (tcp)");
     return close(sockfd) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
@@ -294,7 +341,7 @@ Return value:
     Returns NULL on failure, a FILE pointer on success
 */
 FILE *tcp_client_open_file(char *file_name) {
-    log_trace("executing open_file");
+    log_trace("\tEXECUTING open_file");
     return fopen(file_name, "r");
 }
 
@@ -312,19 +359,46 @@ Return value:
     Returns -1 on failure, the number of characters read on success
 */
 int tcp_client_get_line(FILE *fd, char **action, char **message) {
-    log_trace("entering get_line");
+    log_trace("\tENTERING get_line");
     char *line = NULL;
-    size_t len = 0;
+    size_t len = 0; // does this do anything really?
     ssize_t read;
+
     read = getline(&line, &len, fd);
-    log_trace("line: %s", line);
-    log_trace("of amount: %zu", read);
-    int space = " ";
-    char *spacePos = strchr(line, space);
-    log_trace("from spacePos: %s", spacePos);
-    strncpy(action, line, spacePos - line);
-    log_trace("parsed action: %s", &action);
-    log_trace("exiting get_line");
+    log_trace("Read %i bytes from file", read);
+    if (read == -1)
+        return -1;
+
+    log_trace("Replacing newline with null terminator");
+    char *newline = strchr(line, (int)('\n'));
+    if (newline != NULL)
+        newline[0] = '\0';
+
+    log_trace("Line (of length %zu): '%s'", read, line);
+
+    // get space ptr
+    char *spacePos = strchr(line, (int)(' ')) + sizeof(char);
+    log_trace("Line from spacePos: '%s'", spacePos);
+
+    // get action
+    int action_len = (int)(spacePos - line) - 1;
+    *action = malloc((sizeof(char) + 1) * action_len);
+    log_trace("Executing strncpy(dest, '%s', %i)", line, action_len);
+    strncpy(*action, line, action_len);
+    log_trace("Parsed action: '%s'", *action);
+
+    // get message
+    size_t msg_len = (int)(read - action_len) + 1;
+
+    *message = malloc((sizeof(char) + 1) * msg_len);
+    log_trace("Executing strncpy(dest, '%s', %i)", spacePos, msg_len);
+    strncpy(*message, spacePos, msg_len);
+    // log_trace("Adding null terminator");
+    // (*message)[msg_len + 1] = '\0';
+    log_trace("Parsed msg: '%s'", *message);
+    log_debug("Action: '%s', message: '%s'", *action, *message);
+    log_trace("\tEXITING get_line");
+    return read;
 }
 
 /*
@@ -336,6 +410,6 @@ Return value:
     Returns a 1 on failure, 0 on success
 */
 int tcp_client_close_file(FILE *fd) {
-    log_trace("executing close_file");
+    log_trace("\tEXECUTING close_file");
     return fclose(fd) == 0 ? 0 : 1;
 }
