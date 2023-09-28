@@ -74,7 +74,8 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
     config->file = NULL;
     config->port = NULL;
     config->host = NULL;
-    M while (1) {
+
+    while (1) {
         int option_index = 0;
 
         static struct option long_options[] = {{HELP_FLAG, no_argument, 0, '-'},
@@ -128,14 +129,7 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
         while (optind < argc) {
             char *arg = argv[optind++];
             if (config->file == NULL) {
-                if (is_valid_action(arg)) {
-                    log_debug("Found valid action: %s", arg);
-                    config->file = arg;
-                } else {
-                    fprintf(stderr, "\nInvalid action: %s\n", arg);
-                    print_usage();
-                    return EXIT_FAILURE;
-                }
+                config->file = arg;
             }
         }
     }
@@ -177,7 +171,50 @@ Arguments:
 Return value:
     Returns the socket file descriptor or -1 if an error occurs.
 */
-int tcp_client_connect(Config config);
+int tcp_client_connect(Config config) {
+    log_trace("connecting");
+
+    struct addrinfo hints, *res;
+    int sockfd;
+    int errorStatus = 0;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    log_trace("[struct Config config] host: '%s', port: '%s', ", config.host, config.port);
+    if (hints.ai_addr != NULL) {
+        log_trace("[struct sockaddr hints.ai_addr] sa_family: %i, sa_data: %s",
+                  (int)hints.ai_addr->sa_family, hints.ai_addr->sa_data);
+    } else {
+        log_trace("[struct sockaddr hints.ai_addr] NULL");
+    }
+
+    if ((errorStatus = getaddrinfo(config.host, config.port, &hints, &res)) != 0) {
+        log_error("getaddrinfo returned error code '%i' which means: %s", errorStatus,
+                  gai_strerror(errorStatus));
+        return -1;
+    }
+
+    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    log_trace("sockfd: %i", sockfd);
+
+    if (sockfd == -1)
+        return sockfd;
+
+    if (connect(sockfd, res->ai_addr, res->ai_addrlen) == -1) {
+        log_info("connect() returned -1");
+        return -1;
+    }
+
+    log_trace("calling freeaddrinfo");
+
+    freeaddrinfo(res); // free the linked list
+
+    log_trace("connected");
+
+    return sockfd;
+}
 
 /*
 Description:
@@ -189,7 +226,33 @@ Arguments:
 Return value:
     Returns a 1 on failure, 0 on success
 */
-int tcp_client_send_request(int sockfd, char *action, char *message);
+int tcp_client_send_request(int sockfd, char *action, char *message) {
+    log_trace("entering send_request");
+
+    char messageToSend[1024];
+    sprintf(messageToSend, "%s %d %s", action, (int)strlen(message), message);
+    int bytes_sent = 0;
+    int len = strlen(messageToSend);
+
+    while (len - bytes_sent > 0) {
+        int status = send(sockfd, messageToSend + bytes_sent, len - bytes_sent, 0);
+        log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', \
+            length of message sent: %i",
+                  status, bytes_sent, messageToSend + bytes_sent, len - bytes_sent);
+
+        // did it error
+        if (status == -1) {
+            log_error("An error occured and send returned -1");
+            return EXIT_FAILURE;
+        }
+
+        bytes_sent += status;
+    }
+
+    log_trace("exiting send_request");
+
+    return EXIT_SUCCESS;
+}
 
 /*
 Description:
@@ -213,7 +276,10 @@ Arguments:
 Return value:
     Returns a 1 on failure, 0 on success
 */
-int tcp_client_close(int sockfd);
+int tcp_client_close(int sockfd) {
+    log_trace("executing close (tcp)");
+    return close(sockfd) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
 
 ///////////////////////////////////////////////////////////////////////
 //////////////////////// FILE RELATED FUNCTIONS ///////////////////////
@@ -227,7 +293,10 @@ Arguments:
 Return value:
     Returns NULL on failure, a FILE pointer on success
 */
-FILE *tcp_client_open_file(char *file_name);
+FILE *tcp_client_open_file(char *file_name) {
+    log_trace("executing open_file");
+    return fopen(file_name, "r");
+}
 
 /*
 Description:
@@ -242,7 +311,21 @@ Arguments:
 Return value:
     Returns -1 on failure, the number of characters read on success
 */
-int tcp_client_get_line(FILE *fd, char **action, char **message);
+int tcp_client_get_line(FILE *fd, char **action, char **message) {
+    log_trace("entering get_line");
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read;
+    read = getline(&line, &len, fd);
+    log_trace("line: %s", line);
+    log_trace("of amount: %zu", read);
+    int space = " ";
+    char *spacePos = strchr(line, space);
+    log_trace("from spacePos: %s", spacePos);
+    strncpy(action, line, spacePos - line);
+    log_trace("parsed action: %s", &action);
+    log_trace("exiting get_line");
+}
 
 /*
 Description:
@@ -252,4 +335,7 @@ Arguments:
 Return value:
     Returns a 1 on failure, 0 on success
 */
-int tcp_client_close_file(FILE *fd);
+int tcp_client_close_file(FILE *fd) {
+    log_trace("executing close_file");
+    return fclose(fd) == 0 ? 0 : 1;
+}
