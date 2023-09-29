@@ -4,6 +4,16 @@
 
 #define DEFAULT_MSG_SIZE 1024
 
+int msg_sent = 0;
+int total_msg_sent = 0;
+
+int handle_response(char *msg) {
+    log_debug("\tHANDLE MSG (%i/%i): %s", total_msg_sent - msg_sent + 1, total_msg_sent, msg);
+    fprintf(stdout, "%s\n", msg);
+    msg_sent--;
+    return msg_sent;
+}
+
 int main(int argc, char *argv[]) {
 
     // parse arguments
@@ -26,20 +36,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // obtain file size
-    fseek(fileptr, 0, SEEK_END);
-    long lSize = ftell(fileptr);
-    if (lSize == -1) {
-        fprintf(stderr,
-                "\nError while finding length of file: %s. Run again with [-v, "
-                "--verbose] to see more "
-                "info.\n\n",
-                config.file);
-    }
-    rewind(fileptr);
-
     // open tcp connection
-    // int sockfd = 1;
     int sockfd = tcp_client_connect(config);
     if (sockfd == -1) {
         fprintf(stderr,
@@ -58,6 +55,7 @@ int main(int argc, char *argv[]) {
     while ((read = tcp_client_get_line(fileptr, &action, &message)) > 0) {
         // use action and message to send
         int send_status = tcp_client_send_request(sockfd, action, message);
+        msg_sent++;
         if (send_status == EXIT_FAILURE) {
             fprintf(stderr,
                     "\nError while sending [action: %s, msg: %s] to tcp server: %s:%s. Did you "
@@ -75,7 +73,26 @@ int main(int argc, char *argv[]) {
         free(message);
     }
 
+    total_msg_sent = msg_sent;
+
     // receive
+    if (EXIT_FAILURE == tcp_client_receive_response(sockfd, &handle_response)) {
+        fprintf(stderr,
+                "\nError while receiving responses (%i/%i msgs received). Run again with [-v, "
+                "--verbose] to see more "
+                "info.\n\n",
+                total_msg_sent - msg_sent, total_msg_sent);
+        return EXIT_FAILURE;
+    }
+
+    if (tcp_client_close(sockfd) == EXIT_FAILURE) {
+        fprintf(stderr,
+                "\nError while closing tcp server connection: %s:%s. Run again with[-v,"
+                "--verbose] to see more "
+                "info.\n\n",
+                config.host, config.port);
+        return EXIT_FAILURE;
+    }
 
     // close file
     if (tcp_client_close_file(fileptr) == EXIT_FAILURE) {

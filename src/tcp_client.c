@@ -7,6 +7,7 @@
 
 #include "tcp_client.h"
 #include "log.h"
+#include <ctype.h>
 #include <string.h>
 
 #define HELP_FLAG "help"
@@ -131,6 +132,10 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
             char *arg = argv[optind++];
             if (config->file == NULL) {
                 config->file = arg;
+            } else {
+                fprintf(stderr, "\nUnkown argument: '%s\n", arg);
+                print_usage();
+                return EXIT_FAILURE;
             }
         }
     }
@@ -148,9 +153,9 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
     }
 
     if (config->file == NULL) {
-        fprintf(stderr, "\nA file must be profided.\n");
-        print_usage();
-        return EXIT_FAILURE;
+        log_info("No file provided, using stdin instead. Example usage: echo \"reverse HELLO\" | "
+                 "bin/tcp_client --port 8081 -h lundrigan.byu.edu -");
+        config->file = "-";
     }
 
     log_debug("[config] port: %s, host: %s, file: %s", config->port, config->host, config->file);
@@ -275,14 +280,20 @@ int tcp_client_receive_response(int sockfd, int (*handle_response)(char *)) {
     log_trace("\tENTERING receive_reponse");
 
     int bytes_recv = 0, status = 0, buf_len = 1024, parse_index = 0;
-    bool search_num = true;
+    int search_num = 0;
     bool callback_result = false;
     char *buf = malloc(sizeof(char) * buf_len);
 
     while (!callback_result) {
-        status = recv(sockfd, buf + bytes_recv, strlen(buf), 0);
+        log_trace(
+            "\n[snapshot] search_num: %i, bytes_recv: %i, parse_index: %i, buf: '%s', buf from "
+            "index: '%s'\n",
+            search_num, bytes_recv, parse_index, buf, &buf[parse_index]);
+
+        status = recv(sockfd, buf + bytes_recv, buf_len - bytes_recv, 0);
+
         if (status == 0) {
-            fprintf(stderr, "\nThe server closed the connection before\n");
+            fprintf(stderr, "\nThe server closed the connection before all messages received\n");
             return EXIT_FAILURE;
         } else if (status == -1) {
             fprintf(stderr, "\nAn error occured and send() returned -1\n");
@@ -294,24 +305,68 @@ int tcp_client_receive_response(int sockfd, int (*handle_response)(char *)) {
         // need to update?
         if (bytes_recv >= buf_len - 100) {
             buf_len *= 2;
-            buf = realloc(buf, buf_len);
+            buf = realloc(buf, buf_len * sizeof(char));
         }
 
         buf[bytes_recv] = 0;
 
         log_trace("buffer: %s", buf);
 
-        // check for numbers, parse, and callback
-        // if (search_num && bytes_recv - parse_index > 0) {
-        //     // check for numbers
-        //     char *num;
-        //     while ((num = str))
-        // } else {
-        //     //
-        // }
+        while ((search_num == 0 && bytes_recv - parse_index > 0) ||
+               (search_num > 0 && bytes_recv - parse_index >= search_num)) {
+            // check for numbers, parse, and callback
+            if (search_num == 0 && bytes_recv - parse_index > 0) {
+                // check for numbers
+                while (!isdigit(buf[parse_index]))
+                    parse_index++;
+
+                // get space ptr
+                char *space_pos = strchr(&buf[parse_index], (int)(' ')) + sizeof(char);
+                log_trace("buf from space_pos: '%s'", space_pos);
+
+                // parse the number out as char*
+                int num_len = (int)(space_pos - &buf[parse_index]) - 1;
+                log_trace("num_len: %i", num_len);
+                char *num = malloc(sizeof(char) * (num_len + 1));
+                log_trace("Executing strncpy(dest, '%s', %i)", &buf[parse_index], num_len);
+                strncpy(num, &buf[parse_index], num_len);
+                num[num_len] = 0;
+
+                log_trace("Parsed number: '%s'", num);
+                log_trace("Parsed number as int: '%i'", atoi(num));
+
+                // convert to integer
+                search_num = atoi(num);
+                parse_index += num_len + 1; // + 1 for space
+
+                log_trace("\n[snapshot] search_num: %i, bytes_recv: %i,parse_index: % i ",
+                          search_num, bytes_recv, parse_index);
+
+                free(num);
+            } else if (search_num > 0 && bytes_recv - parse_index >= search_num) {
+                // parse out message!
+                log_trace("parsing out msg");
+                char *msg = malloc(sizeof(char) * search_num);
+                msg[search_num] = 0;
+                strncpy(msg, &buf[parse_index], search_num);
+                log_debug("parsed msg: '%s'", msg);
+
+                // call function
+                callback_result = (handle_response)(msg) == 0;
+
+                free(msg);
+
+                // update values
+                parse_index += search_num;
+                search_num = 0;
+            }
+        }
     }
 
+    free(buf);
+
     log_trace("\tEXITING receive_reponse");
+    fprintf(stderr, "\tEXITING receive_reponse");
     return EXIT_SUCCESS;
 }
 
@@ -342,7 +397,11 @@ Return value:
 */
 FILE *tcp_client_open_file(char *file_name) {
     log_trace("\tEXECUTING open_file");
-    return fopen(file_name, "r");
+    if (strcmp(file_name, "-") == 0) {
+        return stdin;
+    } else {
+        return fopen(file_name, "r");
+    }
 }
 
 /*
@@ -363,39 +422,63 @@ int tcp_client_get_line(FILE *fd, char **action, char **message) {
     char *line = NULL;
     size_t len = 0; // does this do anything really?
     ssize_t read;
+    bool is_valid_msg = false;
 
-    read = getline(&line, &len, fd);
-    log_trace("Read %i bytes from file", read);
-    if (read == -1)
-        return -1;
+    while (!is_valid_msg) {
+        read = getline(&line, &len, fd);
+        log_trace("Read %i bytes from file", read);
+        if (read == -1)
+            return -1;
+        else if (read <= 1) {
+            log_debug("Read returned 0 or one, skipping line: '%s", line);
+            continue;
+        }
 
-    log_trace("Replacing newline with null terminator");
-    char *newline = strchr(line, (int)('\n'));
-    if (newline != NULL)
-        newline[0] = '\0';
+        log_trace("Replacing newline with null terminator");
+        char *newline = strchr(line, (int)('\n'));
+        if (newline != NULL)
+            newline[0] = '\0';
 
-    log_trace("Line (of length %zu): '%s'", read, line);
+        log_trace("Line (of length %zu): '%s'", read, line);
 
-    // get space ptr
-    char *spacePos = strchr(line, (int)(' ')) + sizeof(char);
-    log_trace("Line from spacePos: '%s'", spacePos);
+        // get space ptr
+        char *space_pos = strchr(line, (int)(' '));
+        if (space_pos == NULL) {
+            log_debug("space_pos is NULL. No space found. Skipping line: %s", line);
+            continue;
+        }
+        space_pos++;
+        log_trace("Line from space_pos: '%s'", space_pos);
 
-    // get action
-    int action_len = (int)(spacePos - line) - 1;
-    *action = malloc((sizeof(char) + 1) * action_len);
-    log_trace("Executing strncpy(dest, '%s', %i)", line, action_len);
-    strncpy(*action, line, action_len);
-    log_trace("Parsed action: '%s'", *action);
+        // get action
+        int action_len = (int)(space_pos - line) - 1;
+        *action = malloc((sizeof(char)) * action_len + 1);
+        log_trace("Executing strncpy(dest, '%s', %i)", line, action_len);
+        strncpy(*action, line, action_len);
+        (*action)[action_len] = 0;
+        log_trace("Parsed action: '%s'", *action);
 
-    // get message
-    size_t msg_len = (int)(read - action_len) + 1;
+        if (!is_valid_action(*action)) {
+            log_debug("Action not valid. Skipping line: %s", line);
+            continue;
+        }
 
-    *message = malloc((sizeof(char) + 1) * msg_len);
-    log_trace("Executing strncpy(dest, '%s', %i)", spacePos, msg_len);
-    strncpy(*message, spacePos, msg_len);
-    // log_trace("Adding null terminator");
-    // (*message)[msg_len + 1] = '\0';
-    log_trace("Parsed msg: '%s'", *message);
+        // get message
+        size_t msg_len = (int)(read - action_len) + 1;
+        *message = malloc(sizeof(char) * msg_len + 1);
+        log_trace("Executing strncpy(dest, '%s', %i)", space_pos, msg_len);
+        strncpy(*message, space_pos, msg_len);
+        (*message)[msg_len] = 0;
+        log_trace("Parsed msg: '%s'", *message);
+
+        if (strlen(*message) == 0) {
+            log_debug("No message. Skipping line: %s", line);
+            continue;
+        }
+
+        is_valid_msg = true;
+    }
+
     log_debug("Action: '%s', message: '%s'", *action, *message);
     log_trace("\tEXITING get_line");
     return read;

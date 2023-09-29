@@ -1,0 +1,2 @@
+uppercase hello world
+lowercase goodbye world
