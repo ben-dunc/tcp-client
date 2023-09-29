@@ -1,5 +1,5 @@
 /*
-    tcp_client.c
+    tcp_client.c (v2)
     Created by Benjamin Duncan
     Sep 22, 2023
     For Computer Networks @ BYU

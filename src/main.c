@@ -7,6 +7,15 @@
 int msg_sent = 0;
 int total_msg_sent = 0;
 
+/*
+Description:
+    Handles the response from the receive function. It will output the message, decrement the
+    amount of messages still to be received, and return true if all have been received.
+Arguments:
+    char* msg - the message coming in from the api
+Return value:
+    0 if all messages have been received, > 0 if not
+*/
 int handle_response(char *msg) {
     log_debug("\tHANDLE MSG (%i/%i): %s", total_msg_sent - msg_sent + 1, total_msg_sent, msg);
     fprintf(stdout, "%s\n", msg);
