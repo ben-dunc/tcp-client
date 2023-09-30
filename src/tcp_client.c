@@ -153,9 +153,9 @@ int tcp_client_parse_arguments(int argc, char *argv[], Config *config) {
     }
 
     if (config->file == NULL) {
-        log_info("No file provided, using stdin instead. Example usage: echo \"reverse HELLO\" | "
-                 "bin/tcp_client --port 8081 -h lundrigan.byu.edu -");
-        config->file = "-";
+        fprintf(stderr, "\nNo file provided.\n");
+        print_usage();
+        exit(EXIT_FAILURE);
     }
 
     log_debug("[config] port: %s, host: %s, file: %s", config->port, config->host, config->file);
