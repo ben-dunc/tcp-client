@@ -29,15 +29,6 @@
 
 /*
 Description:
-    A struct to structure bit fields used in sent and recevied messages
-*/
-struct request {
-    unsigned int action : 5;
-    unsigned int msg_length : 27;
-};
-
-/*
-Description:
     Prints the usage of this program
 Arguments:
     none
@@ -61,15 +52,14 @@ void print_usage() {
 }
 
 void print_all_char(char *msg, int len) {
-    fprintf(stderr, "\n\nMessage in char: '");
     for (int i = 0; i < len; i++) {
         fprintf(stderr, "%c", msg[i]);
     }
-    fprintf(stderr, "'\nMessage in hex: '");
+    fprintf(stderr, ", hex: '");
     for (int i = 0; i < len; i++) {
         fprintf(stderr, "%X ", msg[i]);
     }
-    fprintf(stderr, "'\n\n");
+    fprintf(stderr, "', len: %i", len);
 }
 
 /*
@@ -261,86 +251,52 @@ Return value:
 */
 int tcp_client_send_request(int sockfd, char *action, char *message) {
     log_trace("\tENTERING send_request");
-
-    struct request req = {0, 0};
     uint32_t header = 0;
 
     if (0 == strcmp(action, ACTION_UPPERCASE))
         header = ACTION_UPPERCASE_BIN;
-    // req.action = ACTION_UPPERCASE_BIN;
     else if (0 == strcmp(action, ACTION_LOWERCASE))
         header = ACTION_LOWERCASE_BIN;
-    // req.action = ACTION_LOWERCASE_BIN;
     else if (0 == strcmp(action, ACTION_RANDOM))
         header = ACTION_RANDOM_BIN;
-    // req.action = ACTION_RANDOM_BIN;
     else if (0 == strcmp(action, ACTION_SHUFFLE))
         header = ACTION_SHUFFLE_BIN;
-    // req.action = ACTION_SHUFFLE_BIN;
     else if (0 == strcmp(action, ACTION_REVERSE))
         header = ACTION_REVERSE_BIN;
-    // req.action = ACTION_REVERSE_BIN;
-
-    req.msg_length = strlen(message);
-
-    // fprintf(stderr, "\n\nreq.action(%i) - hton: '%X', unchanged: '%X'\n\n", req.action,
-    //         htons(req.action), req.action);
-    // fprintf(stderr, "\n\nreq.msg_length(%i) - hton: '%X', unchanged: '%X'\n\n", req.msg_length,
-    //         htonl(req.msg_length), req.msg_length);
 
     header = (((uint32_t)header) << 27) + (strlen(message));
-    // header = req.action;
-    // header = header << 27;
-    fprintf(stderr, "\n\nheader(%i): hton: '%X', unchanged: '%X'\n\n", header, htonl(header),
-            header);
-    // header += req.msg_length;
-    // fprintf(stderr, "\n\nheader: '%X'\n\n", htonl(header));
-
-    // char *action_length = (char *)&req;
-    // char action_length[4] = ((27 << req.action) | req.msg_length);
-    // char action_length[4] = (char *)(27 < req.action) | req.msg_length;
-
-    // char *header_bytes = (char *)&header;
-    // fprintf(stderr, "\nheader_bytes: '%X %X %X %X'\n", header_bytes[3], header_bytes[2],
-    //         header_bytes[1], header_bytes[0]);
 
     log_trace("init messageToSend");
     int len = 4 + (strlen(message) * sizeof(char)); // 4 bytes for action & message length
-    char *messageToSend = calloc(1, len);
-
-    // messageToSend = (char *)&req;
-    // messageToSend[5] = message;
+    char *messageToSend = calloc(1, len + 1);
 
     log_trace("assigning messageToSend");
     sprintf(messageToSend, "    %s", message);
 
-    for (int i = 0; i < 4; i++) {
-        messageToSend[i] = ((char *)&header)[3 - i];
+    header = htonl(header);
+    for (int i = 0; i < 4; i++)
+        messageToSend[i] = ((char *)&header)[i];
+
+    int bytes_sent = 0;
+    log_trace("entering while loop");
+    while (len - bytes_sent > 0) {
+        int status = send(sockfd, messageToSend + bytes_sent, len - bytes_sent, 0);
+        log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', \
+            length of message sent: %i",
+                  status, bytes_sent, messageToSend + bytes_sent, len - bytes_sent);
+
+        // did it error
+        if (status == -1) {
+            log_error("An error occured and send returned -1");
+            return EXIT_FAILURE;
+        }
+
+        bytes_sent += status;
     }
-    print_all_char(messageToSend, len);
 
-    return 0;
+    log_trace("\tEXITING send_request");
 
-    // int bytes_sent = 0;
-    // log_trace("entering while loop");
-    // while (len - bytes_sent > 0) {
-    //     int status = send(sockfd, messageToSend + bytes_sent, len - bytes_sent, 0);
-    //     log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', \
-    //         length of message sent: %i",
-    //               status, bytes_sent, messageToSend + bytes_sent, len - bytes_sent);
-
-    //     // did it error
-    //     if (status == -1) {
-    //         log_error("An error occured and send returned -1");
-    //         return EXIT_FAILURE;
-    //     }
-
-    //     bytes_sent += status;
-    // }
-
-    // log_trace("\tEXITING send_request");
-
-    // return EXIT_SUCCESS;
+    return EXIT_SUCCESS;
 }
 
 /*
@@ -361,7 +317,7 @@ int tcp_client_receive_response(int sockfd, int (*handle_response)(char *)) {
     int bytes_recv = 0, status = 0, buf_len = 1024, parse_index = 0;
     int search_num = 0;
     bool callback_result = false;
-    char *buf = malloc(sizeof(char) * buf_len);
+    char *buf = malloc(sizeof(char) * buf_len + 1);
 
     while (!callback_result) {
         log_trace(
@@ -384,48 +340,28 @@ int tcp_client_receive_response(int sockfd, int (*handle_response)(char *)) {
         // need to update?
         if (bytes_recv >= buf_len - 100) {
             buf_len *= 2;
-            buf = realloc(buf, buf_len * sizeof(char));
+            buf = realloc(buf, buf_len * sizeof(char) + 1);
         }
 
         buf[bytes_recv] = 0;
 
-        log_trace("buffer: %s", buf);
-
-        while ((search_num == 0 && bytes_recv - parse_index > 0) ||
+        while ((search_num == 0 && bytes_recv - parse_index >= 4) ||
                (search_num > 0 && bytes_recv - parse_index >= search_num)) {
             // check for numbers, parse, and callback
-            if (search_num == 0 && bytes_recv - parse_index > 0) {
-                // check for numbers
-                while (!isdigit(buf[parse_index]))
-                    parse_index++;
+            if (search_num == 0 && bytes_recv - parse_index >= 4) {
+                uint32_t *num = (uint32_t *)&buf[parse_index];
+                search_num = *num;
 
-                // get space ptr
-                char *space_pos = strchr(&buf[parse_index], (int)(' ')) + sizeof(char);
-                log_trace("buf from space_pos: '%s'", space_pos);
-
-                // parse the number out as char*
-                int num_len = (int)(space_pos - &buf[parse_index]) - 1;
-                log_trace("num_len: %i", num_len);
-                char *num = malloc(sizeof(char) * (num_len + 1));
-                log_trace("Executing strncpy(dest, '%s', %i)", &buf[parse_index], num_len);
-                strncpy(num, &buf[parse_index], num_len);
-                num[num_len] = 0;
-
-                log_trace("Parsed number: '%s'", num);
-                log_trace("Parsed number as int: '%i'", atoi(num));
-
-                // convert to integer
-                search_num = atoi(num);
-                parse_index += num_len + 1; // + 1 for space
+                search_num = ntohl(search_num);
+                parse_index += 4;
 
                 log_trace("\n[snapshot] search_num: %i, bytes_recv: %i,parse_index: % i ",
                           search_num, bytes_recv, parse_index);
+            }
 
-                free(num);
-            } else if (search_num > 0 && bytes_recv - parse_index >= search_num) {
-                // parse out message!
-                log_trace("parsing out msg");
-                char *msg = malloc(sizeof(char) * search_num);
+            if (search_num > 0 && bytes_recv - parse_index >= search_num) {
+                // parse out message!/
+                char *msg = malloc(sizeof(char) * search_num + 1);
                 msg[search_num] = 0;
                 strncpy(msg, &buf[parse_index], search_num);
                 log_debug("parsed msg: '%s'", msg);
@@ -442,10 +378,11 @@ int tcp_client_receive_response(int sockfd, int (*handle_response)(char *)) {
         }
     }
 
+    log_trace("freeing buffer");
     free(buf);
+    log_trace("freed buffer");
 
     log_trace("\tEXITING receive_reponse");
-    fprintf(stderr, "\tEXITING receive_reponse");
     return EXIT_SUCCESS;
 }
 
