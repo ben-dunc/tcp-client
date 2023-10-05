@@ -21,6 +21,21 @@
 #define ACTION_SHUFFLE "shuffle"
 #define ACTION_RANDOM "random"
 
+#define ACTION_UPPERCASE_BIN 0x01
+#define ACTION_LOWERCASE_BIN 0x02
+#define ACTION_REVERSE_BIN 0x04
+#define ACTION_SHUFFLE_BIN 0x08
+#define ACTION_RANDOM_BIN 0x10
+
+/*
+Description:
+    A struct to structure bit fields used in sent and recevied messages
+*/
+struct request {
+    unsigned int action : 5;
+    unsigned int msg_length : 27;
+};
+
 /*
 Description:
     Prints the usage of this program
@@ -43,6 +58,18 @@ void print_usage() {
                      "\t--port PORT, -p PORT\n";
 
     fprintf(stderr, "%s", helpInfo);
+}
+
+void print_all_char(char *msg, int len) {
+    fprintf(stderr, "\n\nMessage in char: '");
+    for (int i = 0; i < len; i++) {
+        fprintf(stderr, "%c", msg[i]);
+    }
+    fprintf(stderr, "'\nMessage in hex: '");
+    for (int i = 0; i < len; i++) {
+        fprintf(stderr, "%X ", msg[i]);
+    }
+    fprintf(stderr, "'\n\n");
 }
 
 /*
@@ -235,33 +262,85 @@ Return value:
 int tcp_client_send_request(int sockfd, char *action, char *message) {
     log_trace("\tENTERING send_request");
 
+    struct request req = {0, 0};
+    uint32_t header = 0;
+
+    if (0 == strcmp(action, ACTION_UPPERCASE))
+        header = ACTION_UPPERCASE_BIN;
+    // req.action = ACTION_UPPERCASE_BIN;
+    else if (0 == strcmp(action, ACTION_LOWERCASE))
+        header = ACTION_LOWERCASE_BIN;
+    // req.action = ACTION_LOWERCASE_BIN;
+    else if (0 == strcmp(action, ACTION_RANDOM))
+        header = ACTION_RANDOM_BIN;
+    // req.action = ACTION_RANDOM_BIN;
+    else if (0 == strcmp(action, ACTION_SHUFFLE))
+        header = ACTION_SHUFFLE_BIN;
+    // req.action = ACTION_SHUFFLE_BIN;
+    else if (0 == strcmp(action, ACTION_REVERSE))
+        header = ACTION_REVERSE_BIN;
+    // req.action = ACTION_REVERSE_BIN;
+
+    req.msg_length = strlen(message);
+
+    // fprintf(stderr, "\n\nreq.action(%i) - hton: '%X', unchanged: '%X'\n\n", req.action,
+    //         htons(req.action), req.action);
+    // fprintf(stderr, "\n\nreq.msg_length(%i) - hton: '%X', unchanged: '%X'\n\n", req.msg_length,
+    //         htonl(req.msg_length), req.msg_length);
+
+    header = (((uint32_t)header) << 27) + (strlen(message));
+    // header = req.action;
+    // header = header << 27;
+    fprintf(stderr, "\n\nheader(%i): hton: '%X', unchanged: '%X'\n\n", header, htonl(header),
+            header);
+    // header += req.msg_length;
+    // fprintf(stderr, "\n\nheader: '%X'\n\n", htonl(header));
+
+    // char *action_length = (char *)&req;
+    // char action_length[4] = ((27 << req.action) | req.msg_length);
+    // char action_length[4] = (char *)(27 < req.action) | req.msg_length;
+
+    // char *header_bytes = (char *)&header;
+    // fprintf(stderr, "\nheader_bytes: '%X %X %X %X'\n", header_bytes[3], header_bytes[2],
+    //         header_bytes[1], header_bytes[0]);
+
     log_trace("init messageToSend");
-    char messageToSend[strlen(message) + 20];
+    int len = 4 + (strlen(message) * sizeof(char)); // 4 bytes for action & message length
+    char *messageToSend = calloc(1, len);
+
+    // messageToSend = (char *)&req;
+    // messageToSend[5] = message;
+
     log_trace("assigning messageToSend");
-    sprintf(messageToSend, "%s %d %s", action, (int)strlen(message), message);
-    int bytes_sent = 0;
-    log_trace("getting message length");
-    int len = strlen(messageToSend);
+    sprintf(messageToSend, "    %s", message);
 
-    log_trace("entering while loop");
-    while (len - bytes_sent > 0) {
-        int status = send(sockfd, messageToSend + bytes_sent, len - bytes_sent, 0);
-        log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', \
-            length of message sent: %i",
-                  status, bytes_sent, messageToSend + bytes_sent, len - bytes_sent);
-
-        // did it error
-        if (status == -1) {
-            log_error("An error occured and send returned -1");
-            return EXIT_FAILURE;
-        }
-
-        bytes_sent += status;
+    for (int i = 0; i < 4; i++) {
+        messageToSend[i] = ((char *)&header)[3 - i];
     }
+    print_all_char(messageToSend, len);
 
-    log_trace("\tEXITING send_request");
+    return 0;
 
-    return EXIT_SUCCESS;
+    // int bytes_sent = 0;
+    // log_trace("entering while loop");
+    // while (len - bytes_sent > 0) {
+    //     int status = send(sockfd, messageToSend + bytes_sent, len - bytes_sent, 0);
+    //     log_trace("[sending] status: %i, bytes_recv: %i, message sent: '%s', \
+    //         length of message sent: %i",
+    //               status, bytes_sent, messageToSend + bytes_sent, len - bytes_sent);
+
+    //     // did it error
+    //     if (status == -1) {
+    //         log_error("An error occured and send returned -1");
+    //         return EXIT_FAILURE;
+    //     }
+
+    //     bytes_sent += status;
+    // }
+
+    // log_trace("\tEXITING send_request");
+
+    // return EXIT_SUCCESS;
 }
 
 /*
@@ -418,6 +497,9 @@ Return value:
     Returns -1 on failure, the number of characters read on success
 */
 int tcp_client_get_line(FILE *fd, char **action, char **message) {
+
+    // **** TODO: ONLY ACCEPT MESSAGES WITH LEN OF 2^27 ****
+
     log_trace("\tENTERING get_line");
     char *line = NULL;
     size_t len = 0; // does this do anything really?
