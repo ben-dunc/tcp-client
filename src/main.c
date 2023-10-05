@@ -40,17 +40,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // open file
-    FILE *fileptr = tcp_client_open_file(config.file);
-    if (fileptr == NULL) {
-        fprintf(stderr,
-                "\nError while opening file: %s. Does the file exist? Run again with [-v, "
-                "--verbose] to see more "
-                "info.\n\n",
-                config.file);
-        return EXIT_FAILURE;
-    }
-
     // open tcp connection
     int sockfd = tcp_client_connect(config);
     if (sockfd == -1) {
@@ -64,9 +53,20 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // open file
+    FILE *fileptr = tcp_client_open_file(config.file);
+    if (fileptr == NULL) {
+        fprintf(stderr,
+                "\nError while opening file: %s. Does the file exist? Run again with [-v, "
+                "--verbose] to see more "
+                "info.\n\n",
+                config.file);
+        return EXIT_FAILURE;
+    }
+
     // read from file &send
-    char *action = "uppercase";
-    char *message = "this is my message";
+    char *action;
+    char *message;
     int read = 1;
     while ((read = tcp_client_get_line(fileptr, &action, &message)) > 0) {
         // use action and message to send
@@ -81,6 +81,9 @@ int main(int argc, char *argv[]) {
                     "--verbose] to see more "
                     "info.\n\n",
                     action, message, config.host, config.port);
+            tcp_client_close_file(fileptr);
+            free(action);
+            free(message);
             return EXIT_FAILURE;
         }
 
@@ -98,6 +101,7 @@ int main(int argc, char *argv[]) {
                 "--verbose] to see more "
                 "info.\n\n",
                 total_msg_sent - msg_sent, total_msg_sent);
+        tcp_client_close_file(fileptr);
         return EXIT_FAILURE;
     }
     log_trace("asdf");
@@ -108,6 +112,7 @@ int main(int argc, char *argv[]) {
                 "--verbose] to see more "
                 "info.\n\n",
                 config.host, config.port);
+        tcp_client_close_file(fileptr);
         return EXIT_FAILURE;
     }
 

@@ -27,6 +27,8 @@
 #define ACTION_SHUFFLE_BIN 0x08
 #define ACTION_RANDOM_BIN 0x10
 
+#define MAX_INPUT_SIZE 134217728
+
 /*
 Description:
     Prints the usage of this program
@@ -206,27 +208,25 @@ int tcp_client_connect(Config config) {
     hints.ai_socktype = SOCK_STREAM;
 
     log_trace("[struct Config config] host: '%s', port: '%s', ", config.host, config.port);
-    if (hints.ai_addr != NULL) {
-        log_trace("[struct sockaddr hints.ai_addr] sa_family: %i, sa_data: %s",
-                  (int)hints.ai_addr->sa_family, hints.ai_addr->sa_data);
-    } else {
-        log_trace("[struct sockaddr hints.ai_addr] NULL");
-    }
 
     if ((errorStatus = getaddrinfo(config.host, config.port, &hints, &res)) != 0) {
         log_error("getaddrinfo returned error code '%i' which means: %s", errorStatus,
                   gai_strerror(errorStatus));
+        freeaddrinfo(res); // free the linked list
         return -1;
     }
 
     sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     log_trace("sockfd: %i", sockfd);
 
-    if (sockfd == -1)
+    if (sockfd == -1) {
+        freeaddrinfo(res); // free the linked list
         return sockfd;
+    }
 
     if (connect(sockfd, res->ai_addr, res->ai_addrlen) == -1) {
         log_info("connect() returned -1");
+        freeaddrinfo(res); // free the linked list
         return -1;
     }
 
@@ -267,14 +267,15 @@ int tcp_client_send_request(int sockfd, char *action, char *message) {
     header = (((uint32_t)header) << 27) + (strlen(message));
 
     log_trace("init messageToSend");
-    int len = 4 + (strlen(message) * sizeof(char)); // 4 bytes for action & message length
+    int len = TCP_CLIENT_REQUEST_HEADER_SIZE +
+              (strlen(message) * sizeof(char)); // 4 bytes for action & message length
     char *messageToSend = calloc(1, len + 1);
 
     log_trace("assigning messageToSend");
     sprintf(messageToSend, "    %s", message);
 
     header = htonl(header);
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < TCP_CLIENT_REQUEST_HEADER_SIZE; i++)
         messageToSend[i] = ((char *)&header)[i];
 
     int bytes_sent = 0;
@@ -288,11 +289,14 @@ int tcp_client_send_request(int sockfd, char *action, char *message) {
         // did it error
         if (status == -1) {
             log_error("An error occured and send returned -1");
+            free(messageToSend);
             return EXIT_FAILURE;
         }
 
         bytes_sent += status;
     }
+
+    free(messageToSend);
 
     log_trace("\tEXITING send_request");
 
@@ -345,15 +349,15 @@ int tcp_client_receive_response(int sockfd, int (*handle_response)(char *)) {
 
         buf[bytes_recv] = 0;
 
-        while ((search_num == 0 && bytes_recv - parse_index >= 4) ||
+        while ((search_num == 0 && bytes_recv - parse_index >= TCP_CLIENT_RESPONSE_HEADER_SIZE) ||
                (search_num > 0 && bytes_recv - parse_index >= search_num)) {
             // check for numbers, parse, and callback
-            if (search_num == 0 && bytes_recv - parse_index >= 4) {
+            if (search_num == 0 && bytes_recv - parse_index >= TCP_CLIENT_RESPONSE_HEADER_SIZE) {
                 uint32_t *num = (uint32_t *)&buf[parse_index];
                 search_num = *num;
 
                 search_num = ntohl(search_num);
-                parse_index += 4;
+                parse_index += TCP_CLIENT_RESPONSE_HEADER_SIZE;
 
                 log_trace("\n[snapshot] search_num: %i, bytes_recv: %i,parse_index: % i ",
                           search_num, bytes_recv, parse_index);
@@ -446,9 +450,10 @@ int tcp_client_get_line(FILE *fd, char **action, char **message) {
     while (!is_valid_msg) {
         read = getline(&line, &len, fd);
         log_trace("Read %i bytes from file", read);
-        if (read == -1)
+        if (read == -1) {
+            free(line);
             return -1;
-        else if (read <= 1) {
+        } else if (read <= 1) {
             log_debug("Read returned 0 or one, skipping line: '%s", line);
             continue;
         }
@@ -458,12 +463,12 @@ int tcp_client_get_line(FILE *fd, char **action, char **message) {
         if (newline != NULL)
             newline[0] = '\0';
 
-        log_trace("Line (of length %zu): '%s'", read, line);
+        log_debug("Line (of length %zu): '%s'", read, line);
 
         // get space ptr
         char *space_pos = strchr(line, (int)(' '));
         if (space_pos == NULL) {
-            log_debug("space_pos is NULL. No space found. Skipping line: %s", line);
+            log_info("space_pos is NULL. No space found. Skipping line: %s", line);
             continue;
         }
         space_pos++;
@@ -478,7 +483,7 @@ int tcp_client_get_line(FILE *fd, char **action, char **message) {
         log_trace("Parsed action: '%s'", *action);
 
         if (!is_valid_action(*action)) {
-            log_debug("Action not valid. Skipping line: %s", line);
+            log_info("Action not valid. Skipping line: %s", line);
             continue;
         }
 
@@ -491,12 +496,17 @@ int tcp_client_get_line(FILE *fd, char **action, char **message) {
         log_trace("Parsed msg: '%s'", *message);
 
         if (strlen(*message) == 0) {
-            log_debug("No message. Skipping line: %s", line);
+            log_info("No message. Skipping line: %s", line);
+            continue;
+        } else if (strlen(*message) >= MAX_INPUT_SIZE) {
+            log_info("Message is too long. Max is %i bytes. Skipping line.", MAX_INPUT_SIZE);
             continue;
         }
 
         is_valid_msg = true;
     }
+
+    free(line);
 
     log_debug("Action: '%s', message: '%s'", *action, *message);
     log_trace("\tEXITING get_line");
